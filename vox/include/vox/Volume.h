@@ -12,22 +12,30 @@ namespace vox {
 template<typename Type, VoxSize kWidth, VoxSize kHeight, VoxSize kDepth>
 class Volume {
 private:
-    static const VoxArea kLayerSize = kWidth * kDepth;
-    static const VoxVolume kVolumeSize = kLayerSize * kHeight;
-    static const size_t kDataSize = kVolumeSize * sizeof (Type);
-
     Type* data_;
 
+    VoxArea* layer_block_count_;
+
 public:
+    static const VoxSize kWidth = kWidth;
+    static const VoxSize kHeight = kHeight;
+    static const VoxSize kDepth = kDepth;
+    static const VoxArea kLayerSize = kWidth * kDepth;
+    static const VoxVolume kVolumeSize = kLayerSize * kHeight;
+    
     Volume (const bool clear_data) {
         data_ = new Type[kVolumeSize];
         if (clear_data) {
-            memset (data_, 0x00, kDataSize);
+            memset (data_, 0x00, kVolumeSize * sizeof (Type));
         }
+
+        layer_block_count_ = new VoxArea[kHeight];
+        memset (layer_block_count_, 0, kHeight * sizeof (VoxArea));
     }
 
     ~Volume () {
         delete[] data_;
+        delete[] layer_block_count_;
     }
 
 
@@ -35,16 +43,28 @@ public:
         return y * kLayerSize + z * kWidth + x;
     }
 
-    inline bool PositionOutOfBounds (VoxPos x, VoxPos y, VoxPos z) {
+    inline bool PositionOutOfBounds (VoxPos x, VoxPos y, VoxPos z) const {
         return x < 0 || x >= width_ || y < 0 || y >= height_ || z < 0 || z >= depth_;
     }
     
-    Type GetVoxel (const VoxPos x, const VoxPos y, const VoxPos z) const {
+    inline Type GetVoxel (const VoxPos x, const VoxPos y, const VoxPos z) const {
         return data_[GetVoxelIndex (x, y, z)];
     }
 
     void SetVoxel (const VoxPos x, const VoxPos y, const VoxPos z, const Type voxel) {
-        data_[GetVoxelIndex (x, y, z)] = voxel;
+        Type& voxel_at_pos = data_[GetVoxelIndex (x, y, z)];
+        if (voxel == 0) {
+            if (voxel_at_pos == 0) {
+                return;
+            }else {
+                layer_block_count_[y] -= 1;
+            }
+        }else { /* voxel != 0 */
+            if (voxel_at_pos == 0) {
+                layer_block_count_[y] += 1;
+            }
+        }
+        voxel_at_pos = voxel;
     }
 
     void SetVoxelsInRegion (const Region& region, const Type voxel) {
@@ -59,14 +79,28 @@ public:
             }
         }
     }
+
+
+    inline bool IsLayerEmpty (const VoxPos y) const {
+        return layer_block_count_[y] == 0;
+    }
+
+    inline u32 CountLayersWithVoxels () const {
+        u32 count = 0;
+        for (VoxPos y = 0; y < height (); ++y) {
+            if (layer_block_count_[y] != 0) ++count;
+        }
+        return count;
+    }
     
 
     inline Type* data () const { return data_; }
-    inline const size_t data_size () const { return kDataSize; } 
-    inline const VoxSize width () const { return kWidth; }
-    inline const VoxSize height () const { return kHeight; }
-    inline const VoxSize depth () const { return kDepth; }
-    inline const VoxVolume volume () const { return kVolumeSize; }
+    inline static const size_t data_size () { return kVolumeSize * sizeof (Type); } 
+    inline static const VoxSize width () { return kWidth; }
+    inline static const VoxSize height () { return kHeight; }
+    inline static const VoxSize depth () { return kDepth; }
+    inline static const VoxArea area () { return kLayerSize; }
+    inline static const VoxVolume volume () { return kVolumeSize; }
 };
 
 }

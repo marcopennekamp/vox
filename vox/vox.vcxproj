@@ -128,6 +128,7 @@
   <ItemGroup>
     <ClInclude Include="include\vox\generator\CubeGenerator.h" />
     <ClInclude Include="include\vox\Region.h" />
+    <ClInclude Include="include\vox\util\RawList.h" />
     <ClInclude Include="include\vox\Volume.h" />
     <ClInclude Include="include\vox\vox.h" />
   </ItemGroup>

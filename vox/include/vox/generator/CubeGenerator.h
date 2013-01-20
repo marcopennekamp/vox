@@ -1,11 +1,10 @@
 #ifndef VOX_GENERATOR_CUBEGENERATOR_H_
 #define VOX_GENERATOR_CUBEGENERATOR_H_
 
-#include <vector>
-
 #include <coin/gl.h>
 
 #include <vox/Volume.h>
+#include <vox/util/RawList.h>
 
 
 namespace vox {
@@ -17,92 +16,131 @@ public:
         GLfloat x, y, z;
         GLfloat normal_x, normal_y, normal_z;
         GLfloat texture_id;
-    };
 
-private:
-    struct CubeFace {
-        VoxPos x, y, z;
-        VoxSize width, height;
-        VoxelType voxel;
-
-        CubeFace (const VoxPos x, const VoxPos y, const VoxPos z, 
-            const VoxSize width, const VoxSize height, const VoxelType voxel) {
+        Vertex (GLfloat x, GLfloat y, GLfloat z,
+                GLfloat normal_x, GLfloat normal_y, GLfloat normal_z,
+                GLfloat texture_id) {
             this->x = x;
             this->y = y;
             this->z = z;
-            this->width = width;
-            this->height = height;
-            this->voxel = voxel;
-        }
-
-        ~CubeFace () {
+            this->normal_x = normal_x;
+            this->normal_y = normal_y;
+            this->normal_z = normal_z;
+            this->texture_id = texture_id;
         }
     };
 
-    VoxSize last_volume_size_;
+private:
+    /*
+     * A bitmask for the cube merger to identify already merged quads.
+     * Should be allocated on the stack!
+     */
+    template<VoxSize kHeight>
+    class Layer {
+    public:
+        typedef bool T;
 
-    std::vector<Vertex> vertices_;
-    std::vector<IndexType> indices_;
+        inline static size_t GetIndex (VoxPos x, VoxPos y) {
+            return y * kHeight + x;
+        }
 
-    CubeFace* top_faces_;
-    size_t top_faces_index_;
+        inline static bool Get (T* layer, VoxPos x, VoxPos y) {
+            return layer[GetIndex (x, y)];
+        }
 
-    inline size_t GetLayerIndex (VoxSize height, VoxPos x, VoxPos y) {
-        return y * height + x;
-    }
-    
-    inline u8 GetLayerFlag (u8* layer, VoxSize height, VoxPos x, VoxPos y) {
-        return layer[GetLayerIndex (height, x, y)];
-    }
+        inline static void Set (T* layer, VoxPos x, VoxPos y, bool flag) {
+            layer[GetIndex (x, y)] = flag;
+        }
+    };
 
-    inline void SetLayerFlag (u8* layer, VoxSize height, VoxPos x, VoxPos y, u8 element) {
-        layer[GetLayerIndex (height, x, y)] = element;
+    u64 vertices_generated_;
+    u32 runs_;
+    u32 average_vertex_count_;
+    u32 expected_vertex_count_;
+    bool update_;
+
+    RawList<Vertex> vertices_;
+    RawList<IndexType> indices_;
+
+    template<typename T>
+    inline void ReserveCapacity (RawList<T>& list, size_t needed) {
+        if (needed > list.size ()) {
+            list.Resize (needed);
+        }
     }
 
 
 public:
     CubeGenerator () {
-        top_faces_ = NULL;
-        last_volume_size_ = 0;
+        vertices_generated_ = 0; /* The maximum possible face count. */
+        runs_ = 0;
+        update_ = false;
     }
 
     ~CubeGenerator () {
-        if (top_faces_ != NULL) free (top_faces_);
+        
     }
 
-    void PrintLayer (u8* layer, VolumeType& volume) {
-        for (int lz = 0; lz < volume.depth (); ++lz) {
-            for (int lx = 0; lx < volume.width (); ++lx) {
-                printf ("%u ", GetLayerFlag (layer, volume.width (), lx, lz));
+    void UpdateExpectedVertexCount () {
+        const float kVertexCountUpdateTreshold = 0.2f;
+
+        average_vertex_count_ = (u32) vertices_generated_ / runs_;
+
+        bool update_expected = false;
+        u32 diff = average_vertex_count_ - expected_vertex_count_;
+
+        /* Update the expected vertex count when the treshold is passed. */
+        if (diff < 0.0f) { /* Decrease size. */
+            if ((u32) ((float) average_vertex_count_ * (1.0f + kVertexCountUpdateTreshold)) < expected_vertex_count_) {
+                update_expected = true;
             }
-            printf ("\n");
+        }else if (diff > 0.0f) { /* Increase size. */
+            if ((u32) ((float) average_vertex_count_ * (1.0f - kVertexCountUpdateTreshold)) > expected_vertex_count_) {
+                update_expected = true;
+            }
         }
-        printf ("\n\n");
+
+        if (update_expected) {
+            expected_vertex_count_ = average_vertex_count_;
+            update_ = true;
+        }
     }
 
-    void Generate (VolumeType& volume) {
-        /* Resize vectors if volume size differs. */
-        if (last_volume_size_ != volume.volume ()) {
-            const u32 max_faces = volume.volume () * 3;
-            vertices_.reserve (max_faces * 4);
-            indices_.reserve (max_faces * 6);
+    void Generate (VolumeType& volume, float* voxel_texture_ids) {
+        /* Clear any data. */
+        vertices_.ResetIterator ();
+        indices_.ResetIterator ();
 
-            const size_t face_array_size = max_faces * sizeof (CubeFace);
-            if (top_faces_ == NULL) {
-                top_faces_ = (CubeFace*) malloc (face_array_size);
-            }else {
-                top_faces_ = (CubeFace*) realloc (top_faces_, face_array_size);
-            }
+        /* Resize vectors if the expected face count is different. 
+            Don't consider the amount of layers here, 
+            because that would make the average calculation worse. */
+        if (update_) {
+            // size_t allocation_size = 0;
+            const size_t vertices_size = expected_vertex_count_ * 4;
+            const size_t indices_size = expected_vertex_count_ * 6;
+
+            vertices_.Resize (vertices_size);
+            indices_.Resize (indices_size);
+            
+            // allocation_size += vertices_size * sizeof (Vertex);
+            // allocation_size += indices_size * sizeof (IndexType);
+            // printf ("Approximate number of bytes allocated: %llu\n", allocation_size);
+
+            update_ = false;
         }
-        vertices_.clear ();
-        indices_.clear ();
-        top_faces_index_ = 0;
-        last_volume_size_ = volume.volume ();
+
+        const u32 filled_layer_count = volume.CountLayersWithVoxels ();
 
         /* Generate top faces. */
-        const size_t layer_size = volume.width () * volume.depth ();
-        u8* layer = new u8[layer_size];
         for (VoxPos y = 0; y < volume.height (); ++y) {
+
+            /* Skip empty layers. */
+            if (volume.IsLayerEmpty (y)) {
+                continue;
+            }
+
+            typedef Layer<VolumeType::kDepth> LayerY;
+            LayerY::T layer [VolumeType::kWidth * VolumeType::kDepth];
 
             /* Fill layer information. */
             for (VoxPos z = 0; z < volume.depth (); ++z) {
@@ -111,8 +149,7 @@ public:
 
                     /* Air voxels can be ignored. */
                     if (voxel == 0) {
-                        //printf ("Air voxel: (%u, %u, %u)\n", x, y, z);
-                        SetLayerFlag (layer, volume.width (), x, z, 1);
+                        LayerY::Set (layer, x, z, true);
                         continue;
                     }
 
@@ -120,23 +157,21 @@ public:
                     {
                         const VoxPos y_above = y + 1;
                         if (y_above < volume.height () && volume.GetVoxel (x, y_above, z) > 0) {
-                            //printf ("Cube above: (%u, %u, %u)\n", x, y, z);
-                            SetLayerFlag (layer, volume.width (), x, z, 1);
+                            LayerY::Set (layer, x, z, true);
                             continue;
                         }
                     }
 
-                    SetLayerFlag (layer, volume.width (), x, z, 0);
+                    /* Otherwise, clear the layer value. */
+                    LayerY::Set (layer, x, z, false);
                 }
             }
-
-            //PrintLayer (layer, volume);
 
             /* Generate faces. */
             for (VoxPos z = 0; z < volume.depth (); ++z) {
                 for (VoxPos x = 0; x < volume.width (); ) {
                     /* Continue if the voxel is already in some quad or invalid. */
-                    if (GetLayerFlag (layer, volume.width (), x, z)) {
+                    if (LayerY::Get (layer, x, z)) {
                         ++x;
                         continue;
                     }
@@ -146,25 +181,22 @@ public:
                     /* Get maximum adjacent z. */
                     VoxPos z_end = z + 1;
                     for (; z_end < volume.depth (); ++z_end) {
-                        if (GetLayerFlag (layer, volume.width (), x, z_end) || 
+                        if (LayerY::Get (layer, x, z_end) ||
                             volume.GetVoxel (x, y, z_end) != voxel) break;
                     }
 
                     /* Get maximum adjacent x. */
                     VoxPos x_end = x + 1;
                     for (; x_end < volume.width (); ++x_end) {
-                        if (GetLayerFlag (layer, volume.width (), x_end, z) ||
+                        if (LayerY::Get (layer, x_end, z) ||
                             volume.GetVoxel (x_end, y, z) != voxel) break;
                     }
-
-                    //printf ("Adjacent: (%u, %u, %u) (%u, %u)\n", x, y, z, z_end, x_end);
 
                     /* Check enclosed voxels on z axis. */
                     for (VoxPos search_x = x + 1; search_x < x_end; ++search_x) {
                         for (VoxPos search_z = z + 1; search_z < z_end; ++search_z) {
-                            if (GetLayerFlag (layer, volume.width (), search_x, search_z) 
+                            if (LayerY::Get (layer, search_x, search_z)
                                 || volume.GetVoxel (search_x, y, search_z) != voxel) {
-                                    //printf ("Break z-axis search: (%u, %u, %u) (%u, %u)\n", x, y, z, search_x, search_z);
                                 z_end = search_z;
                                 break;
                             }
@@ -174,30 +206,42 @@ public:
                     /* Check enclosed voxels on x axis. */
                     for (VoxPos search_z = z + 1; search_z < z_end; ++search_z) {
                         for (VoxPos search_x = x + 1; search_x < x_end; ++search_x) {
-                            if (GetLayerFlag (layer, volume.width (), search_x, search_z) 
+                            if (LayerY::Get (layer, search_x, search_z)
                                 || volume.GetVoxel (search_x, y, search_z) != voxel) {
-                                    //printf ("Break x-axis search: (%u, %u, %u) (%u, %u)\n", x, y, z, search_x, search_z);
                                 x_end = search_x;
                                 break;
                             }
                         }
                     }
 
-                    //printf ("After enclosing search: (%u, %u, %u) (%u, %u)\n", x, y, z, z_end, x_end);
-
-                    /* Add cube face. */
+                    /* Width and depth. */
                     const VoxSize width = x_end - x;
                     const VoxSize depth = z_end - z;
-                    top_faces_[top_faces_index_] = CubeFace (x, y, z, width, depth, voxel);
-                    ++top_faces_index_;
+
+                    /* Add vertices. */
+                    ReserveCapacity (vertices_, vertices_.iterator () + 4);
+
+                    float texture_id = voxel_texture_ids[voxel];
+                    IndexType vertex_0 = (IndexType) vertices_.iterator ();
+                    vertices_.Next () = Vertex (x, y, z,            0.0f, 0.0f, 0.0f, texture_id);
+                    vertices_.Next () = Vertex (x_end, y, z,        0.0f, 0.0f, 0.0f, texture_id);
+                    vertices_.Next () = Vertex (x_end, y, z_end,    0.0f, 0.0f, 0.0f, texture_id);
+                    vertices_.Next () = Vertex (x, y, z_end,        0.0f, 0.0f, 0.0f, texture_id);
+
+                    /* Add indices. */
+                    ReserveCapacity (indices_, indices_.iterator () * 6);
+
+                    indices_.Next () = vertex_0;
+                    indices_.Next () = vertex_0 + 1;
+                    indices_.Next () = vertex_0 + 2;
+                    indices_.Next () = vertex_0 + 2;
+                    indices_.Next () = vertex_0 + 3;
+                    indices_.Next () = vertex_0;
 
                     /* Mark layer. */
                     for (VoxPos mark_z = z; mark_z < z_end; ++mark_z) {
-                        memset (layer + GetLayerIndex (volume.width (), x, mark_z), 0x01, width);
+                        memset (layer + LayerY::GetIndex (x, mark_z), 0x01, width);
                     }
-
-                    //printf ("Width: %u\n", width);
-                    //PrintLayer (layer, volume);
 
                     /* Offset x and z. */
                     if (width == depth && x_end == volume.width ()) { /* Rectangular full-fill. */
@@ -211,17 +255,14 @@ public:
             }
         }
 
+        runs_ += 1;
+        vertices_generated_ += vertices_.iterator ();
 
-        /* for (size_t i = 0; i < top_faces_index_; ++i) {
-            CubeFace& face = top_faces_[i];
-            printf ("(%u, %u, %u) {%u, %u} : %u\n", face.x, face.y, face.z, face.width, face.height, face.voxel);
-        } */
-        
-        delete[] layer;
+        UpdateExpectedVertexCount ();
     }
 
-    std::vector<Vertex>& vertices () { return vertices_; }
-    std::vector<IndexType>& indices () { return indices_; }
+    inline RawList<Vertex>& vertices () const { return vertices_; }
+    inline RawList<IndexType>& indices () const { return indices_; }
 };
 
 }
