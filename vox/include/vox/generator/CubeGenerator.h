@@ -148,7 +148,7 @@ public:
                     VoxelType voxel = volume.GetVoxel (x, y, z);
 
                     /* Air voxels can be ignored. */
-                    if (voxel == 0) {
+                    if (voxel == kEmptyCubeIndex) {
                         LayerY::Set (layer, x, z, true);
                         continue;
                     }
