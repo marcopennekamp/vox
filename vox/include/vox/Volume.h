@@ -3,6 +3,8 @@
 
 #include <string.h>
 
+#include <coin/gl.h>
+
 #include <vox/vox.h>
 #include <vox/Region.h>
 
@@ -14,7 +16,13 @@ class Volume {
 private:
     Type* data_;
 
-    VoxArea* layer_block_count_;
+    GLuint x_;
+    GLuint y_;
+    GLuint z_;
+
+    VoxArea* layer_x_block_count_;
+    VoxArea* layer_y_block_count_;
+    VoxArea* layer_z_block_count_;
 
 public:
     static const VoxSize kWidth = kWidth;
@@ -23,19 +31,28 @@ public:
     static const VoxArea kLayerSize = kWidth * kDepth;
     static const VoxVolume kVolumeSize = kLayerSize * kHeight;
     
-    Volume (const bool clear_data) {
+    Volume (const GLuint x, const GLuint y, const GLuint z, const bool clear_data) {
         data_ = new Type[kVolumeSize];
         if (clear_data) {
             memset (data_, 0x00, kVolumeSize * sizeof (Type));
         }
 
-        layer_block_count_ = new VoxArea[kHeight];
-        memset (layer_block_count_, 0, kHeight * sizeof (VoxArea));
+        x_ = x;
+        y_ = y;
+        z_ = z;
+        layer_x_block_count_ = new VoxArea[kWidth];
+        layer_y_block_count_ = new VoxArea[kHeight];
+        layer_z_block_count_ = new VoxArea[kDepth];
+        memset (layer_x_block_count_, 0, kWidth * sizeof (VoxArea));
+        memset (layer_y_block_count_, 0, kHeight * sizeof (VoxArea));
+        memset (layer_z_block_count_, 0, kDepth * sizeof (VoxArea));
     }
 
     ~Volume () {
         delete[] data_;
-        delete[] layer_block_count_;
+        delete[] layer_x_block_count_;
+        delete[] layer_y_block_count_;
+        delete[] layer_z_block_count_;
     }
 
 
@@ -44,10 +61,15 @@ public:
     }
 
     inline bool PositionOutOfBounds (VoxPos x, VoxPos y, VoxPos z) const {
-        return x < 0 || x >= width_ || y < 0 || y >= height_ || z < 0 || z >= depth_;
+        return x < 0 || x >= kWidth || y < 0 || y >= kHeight || z < 0 || z >= kDepth;
     }
     
-    inline Type GetVoxel (const VoxPos x, const VoxPos y, const VoxPos z) const {
+    inline Type GetVoxel (const VoxPos x, const VoxPos y, const VoxPos z, const bool check_bounds = false) const {
+        if (check_bounds) {
+            if (PositionOutOfBounds (x, y, z)) {
+                return 0;
+            }
+        }
         return data_[GetVoxelIndex (x, y, z)];
     }
 
@@ -57,11 +79,15 @@ public:
             if (voxel_at_pos == 0) {
                 return;
             }else {
-                layer_block_count_[y] -= 1;
+                layer_x_block_count_[x] -= 1;
+                layer_y_block_count_[y] -= 1;
+                layer_z_block_count_[z] -= 1;
             }
         }else { /* voxel != 0 */
             if (voxel_at_pos == 0) {
-                layer_block_count_[y] += 1;
+                layer_x_block_count_[x] += 1;
+                layer_y_block_count_[y] += 1;
+                layer_z_block_count_[z] += 1;
             }
         }
         voxel_at_pos = voxel;
@@ -80,21 +106,24 @@ public:
         }
     }
 
-
-    inline bool IsLayerEmpty (const VoxPos y) const {
-        return layer_block_count_[y] == 0;
+    inline bool IsLayerXEmpty (const VoxPos x) const {
+        return layer_x_block_count_[x] == 0;
     }
 
-    inline u32 CountLayersWithVoxels () const {
-        u32 count = 0;
-        for (VoxPos y = 0; y < height (); ++y) {
-            if (layer_block_count_[y] != 0) ++count;
-        }
-        return count;
+    inline bool IsLayerYEmpty (const VoxPos y) const {
+        return layer_y_block_count_[y] == 0;
     }
-    
+
+    inline bool IsLayerZEmpty (const VoxPos z) const {
+        return layer_z_block_count_[z] == 0;
+    }
+
 
     inline Type* data () const { return data_; }
+    inline GLuint x () const { return x_; }
+    inline GLuint y () const { return y_; }
+    inline GLuint z () const { return z_; }
+    
     inline static const size_t data_size () { return kVolumeSize * sizeof (Type); } 
     inline static const VoxSize width () { return kWidth; }
     inline static const VoxSize height () { return kHeight; }

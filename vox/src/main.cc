@@ -38,13 +38,13 @@ int main (int argv, char** argc) {
     };
 
     u64 time = TimeNanoseconds ();
-    BlockVolume volume (true);
+    BlockVolume volume (0, 0, 0, true);
     volume.SetVoxelsInRegion (Region (0, 0, 0, 32, 1, 32), 0x01);
     volume.SetVoxelsInRegion (Region (4, 1, 4, 8, 1, 8), 0x01);
     printf ("Volume creation took %lluns.\n", TimeNanoseconds () - time);
 
     time = TimeNanoseconds ();
-    BlockVolumeBig big_volume (true);
+    BlockVolumeBig big_volume (0, 0, 0, true);
     big_volume.SetVoxelsInRegion (Region (0, 0, 0, 64, 1, 64), 0x01);
     big_volume.SetVoxelsInRegion (Region (16, 1, 16, 32, 1, 32), 0x01);
     printf ("Big volume creation took %lluns.\n", TimeNanoseconds () - time);
@@ -55,7 +55,7 @@ int main (int argv, char** argc) {
     u64 sum = 0;
     for (int i = 0; i < 64; ++i) {
         time = TimeNanoseconds ();
-        generator.Generate (volume, texture_ids);
+        generator.Generate (volume, texture_ids, 0.5f);
         u64 diff = TimeNanoseconds () - time;
         sum += diff;
         printf ("Cube merging took %lluns.\n", diff);
@@ -65,7 +65,7 @@ int main (int argv, char** argc) {
     sum = 0;
     for (int i = 0; i < 8; ++i) {
         time = TimeNanoseconds ();
-        big_generator.Generate (big_volume, texture_ids);
+        big_generator.Generate (big_volume, texture_ids, 0.5f);
         u64 diff = TimeNanoseconds () - time;
         sum += diff;
         printf ("Big cube merging took %lluns.\n", diff);
